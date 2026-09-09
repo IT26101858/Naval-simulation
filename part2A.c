@@ -1,1342 +1,2541 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <time.h>
 
-#define G 9.81
-#define PI 3.14159265
 #define MAX_SHIPS 100
-
-struct Battleship {
-    char notation;
-    char name[30];
-    char gun_name[40];
-
-    int x, y;
-
-    float max_speed;
-    float health;
-    float impact_power;
-
-    int shots_fired;
-    float reload_time;
-};
-
-struct EscortShip {
-    int id;
-    char notation;
-    char type_name[30];
-
-    int x, y;
-
-    float min_speed;
-    float max_speed;
-
-    float min_angle;
-    float max_angle;
-
-    float impact_power;
-    float health;
-    float distance;
-
-    int has_attacked;
-};
-
-char setup_b_notation = 'U';
-
-int setup_canvas_size = 5000;
-int setup_escort_count = 5;
-int setup_k_points = 10;
-
-int setup_jam_iteration = 5;
-float setup_theta_min = 20.0;
-
-float setup_b_reload = 10.0;
-
-int random_seed = 1;
+#define MAX_POINTS 100
+#define GRAVITY 9.81
+#define PI 3.14159265358979323846
+#define INF_TIME 1.0e12
 
 
-/* ---------------------------------------------------------
-   Battleship setup
-   --------------------------------------------------------- */
+/* =====================================
+             BATTLESHIP
+   ===================================== */
 
-void setupBattleshipProperties()
+typedef struct
 {
-    printf("\n--- Battleship Properties ---\n");
+    char type;
 
-    printf("U - USS Iowa\n");
-    printf("M - King George V\n");
-    printf("R - Richelieu\n");
-    printf("S - Sovetsky Soyuz\n");
+    double x;
+    double y;
 
-    printf("Enter Battleship notation: ");
-    scanf(" %c", &setup_b_notation);
-
-    printf("Enter B firing time T_B: ");
-    scanf("%f", &setup_b_reload);
-
-    printf("Battleship setup completed.\n");
-}
-
-
-/* ---------------------------------------------------------
-   Battlefield setup
-   --------------------------------------------------------- */
-
-void setupBattlefield()
-{
-    printf("\n--- Battlefield Settings ---\n");
-
-    printf("Enter Canvas Size D: ");
-    scanf("%d", &setup_canvas_size);
-
-    printf("Enter Number of Escort Ships: ");
-    scanf("%d", &setup_escort_count);
-
-    if (setup_escort_count > MAX_SHIPS)
-        setup_escort_count = MAX_SHIPS;
-
-    printf("Enter Number of Simulation Points k: ");
-    scanf("%d", &setup_k_points);
-
-    printf("Enter Jam Iteration t: ");
-    scanf("%d", &setup_jam_iteration);
-
-    printf("Enter Minimum Angle theta_min: ");
-    scanf("%f", &setup_theta_min);
-
-    printf("Battlefield setup completed.\n");
-}
-
-
-/* ---------------------------------------------------------
-   Seed setup
-   --------------------------------------------------------- */
-
-void setupSeed()
-{
-    printf("\nEnter random seed: ");
-    scanf("%d", &random_seed);
-
-    srand(random_seed);
-
-    printf("Seed configured.\n");
-}
-
-
-/* ---------------------------------------------------------
-   Setup menu
-   --------------------------------------------------------- */
-
-void setupMenu()
-{
-    int choice;
-
-    do
-    {
-        printf("\n================ SETUP MENU ================\n");
-
-        printf("1. Battleship Properties\n");
-        printf("2. Battlefield / Escort Settings\n");
-        printf("3. Seed Value\n");
-        printf("4. Return\n");
-
-        printf("Enter choice: ");
-        scanf("%d", &choice);
-
-        switch (choice)
-        {
-            case 1:
-                setupBattleshipProperties();
-                break;
-
-            case 2:
-                setupBattlefield();
-                break;
-
-            case 3:
-                setupSeed();
-                break;
-
-            case 4:
-                printf("Returning...\n");
-                break;
-
-            default:
-                printf("Invalid choice.\n");
-        }
-
-    } while (choice != 4);
-}
-
-
-/* ---------------------------------------------------------
-   Get battleship name
-   --------------------------------------------------------- */
-
-void getBattleshipDetails(struct Battleship *b)
-{
-    if (b->notation == 'U')
-    {
-        sprintf(b->name, "USS Iowa (BB-61)");
-        sprintf(b->gun_name, "50-caliber Mark 7 gun");
-    }
-    else if (b->notation == 'M')
-    {
-        sprintf(b->name, "King George V");
-        sprintf(b->gun_name, "356 mm Mark VII gun");
-    }
-    else if (b->notation == 'R')
-    {
-        sprintf(b->name, "Richelieu");
-        sprintf(b->gun_name, "380 mm Mle 1935 gun");
-    }
-    else
-    {
-        sprintf(b->name, "Sovetsky Soyuz");
-        sprintf(b->gun_name, "B-37 gun");
-    }
-}
-
-
-/* ---------------------------------------------------------
-   Get escort ship type name
-   --------------------------------------------------------- */
-
-void getEscortTypeName(struct EscortShip *e)
-{
-    if (e->notation == 'A')
-        sprintf(e->type_name, "Escort Type A");
-
-    else if (e->notation == 'B')
-        sprintf(e->type_name, "Escort Type B");
-
-    else if (e->notation == 'C')
-        sprintf(e->type_name, "Escort Type C");
-
-    else if (e->notation == 'D')
-        sprintf(e->type_name, "Escort Type D");
-
-    else
-        sprintf(e->type_name, "Escort Type E");
-}
-
-
-/* ---------------------------------------------------------
-   Calculate distance
-   --------------------------------------------------------- */
-
-float calculateDistance(int x1, int y1, int x2, int y2)
-{
-    float dx = x2 - x1;
-    float dy = y2 - y1;
-
-    return sqrt((dx * dx) + (dy * dy));
-}
-
-
-/* ---------------------------------------------------------
-   Initialize battlefield
-   --------------------------------------------------------- */
-
-void initializeBattlefield(
-    struct Battleship *b,
-    struct EscortShip enemies[]
-)
-{
-    char notations[5] = {'A', 'B', 'C', 'D', 'E'};
-
-    float impactPower[5] =
-    {
-        0.08,
-        0.06,
-        0.07,
-        0.05,
-        0.04
-    };
-
-    int i;
-
-    b->notation = setup_b_notation;
-
-    b->x = rand() % (setup_canvas_size + 1);
-    b->y = rand() % (setup_canvas_size + 1);
-
-    b->max_speed = 300.0;
-    b->health = 100.0;
+    double maxVelocity;
 
     /*
-       In Part 2-A we have not introduced
-       impact degradation yet.
+       Part 2-A
+
+       Time between two consecutive
+       gun firings of B
     */
-    b->impact_power = 1.0;
 
-    b->shots_fired = 0;
-    b->reload_time = setup_b_reload;
+    double firingInterval;
 
-    getBattleshipDetails(b);
+    /*
+       Used when redoing Part 1-C
+    */
+
+    double cumulativeImpact;
+
+    int alive;
+
+} Battleship;
 
 
-    for (i = 0; i < setup_escort_count; i++)
+/* =====================================
+             ESCORT SHIP
+   ===================================== */
+
+typedef struct
+{
+    int id;
+
+    char type;
+
+    double x;
+    double y;
+
+    double minVelocity;
+    double maxVelocity;
+
+    double minAngle;
+    double maxAngle;
+
+    double impactPower;
+
+    int alive;
+
+    /*
+       In Part 2-A an Escort
+       can still fire only once.
+    */
+
+    int hasFired;
+
+} EscortShip;
+
+
+/* =====================================
+          RANDOM DOUBLE
+   ===================================== */
+
+double randomDouble(double min,
+                    double max)
+{
+    return min +
+           ((double)rand() / RAND_MAX)
+           * (max - min);
+}
+
+
+/* =====================================
+       DISTANCE BETWEEN SHIPS
+   ===================================== */
+
+double distanceBetween(double x1,
+                       double y1,
+                       double x2,
+                       double y2)
+{
+    double dx;
+    double dy;
+
+    dx = x2 - x1;
+
+    dy = y2 - y1;
+
+
+    return sqrt(
+        dx * dx +
+        dy * dy
+    );
+}
+
+
+/* =====================================
+        ESCORT ANGLE RANGE
+   ===================================== */
+
+double getAngleRange(char type)
+{
+    switch(type)
     {
-        int typeIndex = rand() % 5;
+        case 'A':
+            return 20.0;
 
-        enemies[i].id = i + 1;
+        case 'B':
+            return 30.0;
 
-        enemies[i].notation = notations[typeIndex];
+        case 'C':
+            return 25.0;
 
-        enemies[i].impact_power =
-            impactPower[typeIndex];
+        case 'D':
+            return 50.0;
 
-        enemies[i].x =
-            rand() % (setup_canvas_size + 1);
+        case 'E':
+            return 70.0;
 
-        enemies[i].y =
-            rand() % (setup_canvas_size + 1);
+        default:
+            return 0.0;
+    }
+}
 
-        enemies[i].min_speed =
-            20.0 + (rand() % 30);
 
-        enemies[i].max_speed =
-            b->max_speed * 1.2;
+/* =====================================
+       ESCORT IMPACT POWER
+   ===================================== */
 
-        enemies[i].min_angle =
-            10.0 + (rand() % 10);
+double getImpactPower(char type)
+{
+    switch(type)
+    {
+        case 'A':
+            return 0.08;
 
-        enemies[i].max_angle =
-            enemies[i].min_angle + 25.0;
+        case 'B':
+            return 0.06;
 
-        enemies[i].health = 100.0;
+        case 'C':
+            return 0.07;
 
-        enemies[i].has_attacked = 0;
+        case 'D':
+            return 0.05;
 
-        enemies[i].distance =
-            calculateDistance(
-                b->x,
-                b->y,
-                enemies[i].x,
-                enemies[i].y
+        case 'E':
+            return 0.04;
+
+        default:
+            return 0.0;
+    }
+}
+
+
+/* =====================================
+       SET ESCORT PROPERTIES
+   ===================================== */
+
+void setEscortProperties(
+    EscortShip *ship,
+    char type,
+    double battleshipMaxVelocity
+)
+{
+    double angleRange;
+
+
+    angleRange =
+        getAngleRange(type);
+
+
+    ship->type =
+        type;
+
+
+    ship->impactPower =
+        getImpactPower(type);
+
+
+    /*
+       Generate minimum angle
+    */
+
+    ship->minAngle =
+        randomDouble(
+            1.0,
+            89.0 - angleRange
+        );
+
+
+    /*
+       max angle =
+       min angle + angle range
+    */
+
+    ship->maxAngle =
+        ship->minAngle
+        + angleRange;
+
+
+    /*
+       EA maximum velocity
+    */
+
+    if(type == 'A')
+    {
+        ship->maxVelocity =
+            1.2 *
+            battleshipMaxVelocity;
+    }
+
+    else
+    {
+        /*
+           Student implementation
+           choice.
+
+           Random velocity less
+           than B maximum velocity.
+        */
+
+        ship->maxVelocity =
+            randomDouble(
+                0.55 *
+                battleshipMaxVelocity,
+
+                0.95 *
+                battleshipMaxVelocity
+            );
+    }
+
+
+    ship->minVelocity =
+        randomDouble(
+            0.30 *
+            ship->maxVelocity,
+
+            0.60 *
+            ship->maxVelocity
+        );
+
+
+    ship->alive =
+        1;
+
+
+    ship->hasFired =
+        0;
+}
+
+
+/* =====================================
+          PROJECTILE CHECK
+   ===================================== */
+
+int canHit(
+    double distance,
+
+    double minVelocity,
+    double maxVelocity,
+
+    double minAngle,
+    double maxAngle,
+
+    double *hitTime,
+    double *selectedAngle,
+    double *selectedVelocity
+)
+{
+    double angle;
+
+
+    for(
+        angle = minAngle;
+
+        angle <= maxAngle;
+
+        angle += 0.1
+    )
+    {
+        double radians;
+
+        double sinValue;
+
+        double requiredVelocity;
+
+        double time;
+
+
+        /*
+           Convert degrees
+           into radians
+        */
+
+        radians =
+            angle *
+            PI /
+            180.0;
+
+
+        sinValue =
+            sin(
+                2.0 *
+                radians
             );
 
-        getEscortTypeName(&enemies[i]);
-    }
-}
 
-
-/* ---------------------------------------------------------
-   Update distances
-   --------------------------------------------------------- */
-
-void updateDistances(
-    struct Battleship *b,
-    struct EscortShip enemies[]
-)
-{
-    int i;
-
-    for (i = 0; i < setup_escort_count; i++)
-    {
-        if (enemies[i].health > 0)
+        if(sinValue <= 0.0)
         {
-            enemies[i].distance =
-                calculateDistance(
-                    b->x,
-                    b->y,
-                    enemies[i].x,
-                    enemies[i].y
-                );
+            continue;
+        }
+
+
+        /*
+           R = u^2 sin(2theta) / g
+
+           Rearrange:
+
+           u = sqrt(
+                   Rg /
+                   sin(2theta)
+               )
+        */
+
+        requiredVelocity =
+            sqrt(
+                (
+                    distance *
+                    GRAVITY
+                )
+                /
+                sinValue
+            );
+
+
+        /*
+           Check whether velocity
+           is inside gun limits
+        */
+
+        if(
+            requiredVelocity
+                >= minVelocity
+            &&
+            requiredVelocity
+                <= maxVelocity
+        )
+        {
+            /*
+               Projectile flight time
+
+               t = 2u sin(theta) / g
+            */
+
+            time =
+                (
+                    2.0 *
+                    requiredVelocity *
+                    sin(radians)
+                )
+                /
+                GRAVITY;
+
+
+            *hitTime =
+                time;
+
+
+            *selectedAngle =
+                angle;
+
+
+            *selectedVelocity =
+                requiredVelocity;
+
+
+            return 1;
         }
     }
+
+
+    return 0;
 }
 
 
-/* ---------------------------------------------------------
-   Check whether B can hit E
-   --------------------------------------------------------- */
+/* =====================================
+        B ATTACKS ESCORT
+   ===================================== */
 
-int canBattleshipHit(
-    struct Battleship *b,
-    struct EscortShip *e,
-    int jammed
+int battleshipCanHit(
+    Battleship B,
+
+    EscortShip E,
+
+    double minAngle,
+    double maxAngle,
+
+    double *time,
+    double *angle,
+    double *velocity
 )
 {
-    float sineValue;
-    float angle;
+    double distance;
 
-    sineValue =
-        (e->distance * G) /
-        (b->max_speed * b->max_speed);
 
-    if (sineValue > 1.0)
-        return 0;
+    distance =
+        distanceBetween(
+            B.x,
+            B.y,
 
-    angle =
-        (asin(sineValue) / 2.0) *
-        (180.0 / PI);
+            E.x,
+            E.y
+        );
 
-    if (jammed && angle < setup_theta_min)
-        return 0;
 
-    return 1;
+    return canHit(
+        distance,
+
+        0.0,
+        B.maxVelocity,
+
+        minAngle,
+        maxAngle,
+
+        time,
+        angle,
+        velocity
+    );
 }
 
 
-/* ---------------------------------------------------------
-   CUSTOM STRATEGY
-   ---------------------------------------------------------
+/* =====================================
+        ESCORT ATTACKS B
+   ===================================== */
+
+int escortCanHit(
+    Battleship B,
+
+    EscortShip E,
+
+    double *time,
+    double *angle,
+    double *velocity
+)
+{
+    double distance;
+
+
+    distance =
+        distanceBetween(
+            E.x,
+            E.y,
+
+            B.x,
+            B.y
+        );
+
+
+    return canHit(
+        distance,
+
+        E.minVelocity,
+        E.maxVelocity,
+
+        E.minAngle,
+        E.maxAngle,
+
+        time,
+        angle,
+        velocity
+    );
+}
+
+
+/* =====================================
+          COPY ESCORT ARRAY
+   ===================================== */
+
+void copyEscorts(
+    EscortShip destination[],
+    EscortShip source[],
+    int N
+)
+{
+    for(int i = 0;
+        i < N;
+        i++)
+    {
+        destination[i] =
+            source[i];
+    }
+}
+
+
+/* =====================================
+          ATTACK STRATEGY
+   ===================================== */
+
+/*
+   Higher score =
+   higher attack priority.
 
    Strategy:
 
-   1. Highest Impact Power first
-   2. If impact power is equal,
-      nearest E ship first
+   1. If E can hit B,
+      give very high priority.
 
-   This helps B destroy the most dangerous
-   escort ships first.
-   --------------------------------------------------------- */
+   2. Higher impact power
+      gets higher priority.
 
-void sortAttackOrder(
-    struct Battleship *b,
-    struct EscortShip enemies[],
-    int order[],
-    int count
+   3. Faster enemy hit
+      gets slightly higher priority.
+
+   4. Non-dangerous ships
+      are ranked using distance.
+*/
+
+double threatScore(
+    Battleship B,
+    EscortShip E
 )
 {
-    int i, j;
+    double enemyHitTime;
 
-    for (i = 0; i < count; i++)
+    double enemyAngle;
+
+    double enemyVelocity;
+
+    double distance;
+
+
+    distance =
+        distanceBetween(
+            B.x,
+            B.y,
+
+            E.x,
+            E.y
+        );
+
+
+    /*
+       Check whether E
+       can attack B
+    */
+
+    if(
+        escortCanHit(
+            B,
+
+            E,
+
+            &enemyHitTime,
+
+            &enemyAngle,
+
+            &enemyVelocity
+        )
+    )
     {
-        order[i] = i;
+        return
+            10000.0
+
+            +
+
+            E.impactPower *
+            1000.0
+
+            -
+
+            enemyHitTime;
     }
 
-    for (i = 0; i < count - 1; i++)
+
+    /*
+       If E cannot hit B,
+       closer ships get slightly
+       higher priority.
+    */
+
+    return
+        1000.0
+        -
+        distance;
+}
+
+
+/* =====================================
+       BUILD B ATTACK ORDER
+   ===================================== */
+
+int buildAttackOrder(
+    Battleship B,
+
+    EscortShip E[],
+
+    int N,
+
+    double bMinAngle,
+    double bMaxAngle,
+
+    int order[]
+)
+{
+    int count;
+
+
+    count =
+        0;
+
+
+    /*
+       First find all Escorts
+       that B can attack.
+    */
+
+    for(int i = 0;
+        i < N;
+        i++)
     {
-        for (j = i + 1; j < count; j++)
+        double time;
+
+        double angle;
+
+        double velocity;
+
+
+        if(E[i].alive == 0)
         {
-            int a = order[i];
-            int c = order[j];
+            continue;
+        }
 
-            int swapNeeded = 0;
 
-            if (enemies[c].impact_power >
-                enemies[a].impact_power)
-            {
-                swapNeeded = 1;
-            }
-            else if (
-                enemies[c].impact_power ==
-                enemies[a].impact_power &&
-                enemies[c].distance <
-                enemies[a].distance
+        if(
+            battleshipCanHit(
+                B,
+
+                E[i],
+
+                bMinAngle,
+
+                bMaxAngle,
+
+                &time,
+
+                &angle,
+
+                &velocity
+            )
+        )
+        {
+            order[count] =
+                i;
+
+
+            count++;
+        }
+    }
+
+
+    /*
+       Sort by threat score.
+
+       Highest threat first.
+    */
+
+    for(int i = 0;
+        i < count - 1;
+        i++)
+    {
+        int best;
+
+
+        best =
+            i;
+
+
+        for(int j = i + 1;
+            j < count;
+            j++)
+        {
+            if(
+                threatScore(
+                    B,
+                    E[order[j]]
+                )
+
+                >
+
+                threatScore(
+                    B,
+                    E[order[best]]
+                )
             )
             {
-                swapNeeded = 1;
+                best =
+                    j;
             }
+        }
 
-            if (swapNeeded)
-            {
-                int temp = order[i];
 
-                order[i] = order[j];
-                order[j] = temp;
-            }
+        /*
+           Swap
+        */
+
+        if(best != i)
+        {
+            int temp;
+
+
+            temp =
+                order[i];
+
+
+            order[i] =
+                order[best];
+
+
+            order[best] =
+                temp;
+        }
+    }
+
+
+    return count;
+}
+
+
+/* =====================================
+       APPLY ESCORT DAMAGE TO B
+   ===================================== */
+
+void applyEscortDamage(
+    Battleship *B,
+
+    EscortShip *E,
+
+    int cumulativeMode,
+
+    FILE *output,
+
+    double impactTime
+)
+{
+    /*
+       E has now used its
+       single attack.
+    */
+
+    E->hasFired =
+        1;
+
+
+    fprintf(
+        output,
+
+        "Escort E%d type E%c "
+        "hit B at %.2f seconds\n",
+
+        E->id,
+
+        E->type,
+
+        impactTime
+    );
+
+
+    fprintf(
+        output,
+
+        "Impact power = %.2f\n",
+
+        E->impactPower
+    );
+
+
+    /* =================================
+       Part 1-A / 1-B behaviour
+       ================================= */
+
+    if(cumulativeMode == 0)
+    {
+        /*
+           One Escort shell
+           destroys B.
+        */
+
+        B->alive =
+            0;
+
+
+        fprintf(
+            output,
+
+            "Battleship destroyed "
+            "by Escort E%d\n",
+
+            E->id
+        );
+    }
+
+
+    /* =================================
+       Part 1-C behaviour
+       ================================= */
+
+    else
+    {
+        /*
+           Add impact power
+        */
+
+        B->cumulativeImpact +=
+            E->impactPower;
+
+
+        fprintf(
+            output,
+
+            "Cumulative impact "
+            "on B = %.2f\n",
+
+            B->cumulativeImpact
+        );
+
+
+        /*
+           1.0 = 100% damage
+        */
+
+        if(
+            B->cumulativeImpact
+            >= 1.0
+        )
+        {
+            B->alive =
+                0;
+
+
+            fprintf(
+                output,
+
+                "Battleship destroyed.\n"
+            );
+
+
+            fprintf(
+                output,
+
+                "Cumulative impact "
+                "reached 100%%.\n"
+            );
         }
     }
 }
 
 
-/* ---------------------------------------------------------
-   Save initial battlefield
-   --------------------------------------------------------- */
+/* =====================================
+       PROCESS ESCORT ATTACKS
+   ===================================== */
 
-void saveInitialConditions(
-    struct Battleship *b,
-    struct EscortShip enemies[]
+void resolveEscortAttacksUntil(
+    Battleship *B,
+
+    EscortShip E[],
+
+    int N,
+
+    double timeLimit,
+
+    int cumulativeMode,
+
+    FILE *output
+)
+{
+    while(B->alive)
+    {
+        int earliestEscort;
+
+
+        double earliestTime;
+
+
+        earliestEscort =
+            -1;
+
+
+        earliestTime =
+            INF_TIME;
+
+
+        /*
+           Find the Escort whose shell
+           reaches B first.
+        */
+
+        for(int i = 0;
+            i < N;
+            i++)
+        {
+            double time;
+
+            double angle;
+
+            double velocity;
+
+
+            /*
+               Destroyed E cannot attack
+            */
+
+            if(E[i].alive == 0)
+            {
+                continue;
+            }
+
+
+            /*
+               E can only fire once
+            */
+
+            if(E[i].hasFired == 1)
+            {
+                continue;
+            }
+
+
+            if(
+                escortCanHit(
+                    *B,
+
+                    E[i],
+
+                    &time,
+
+                    &angle,
+
+                    &velocity
+                )
+            )
+            {
+                if(
+                    time <= timeLimit
+                    &&
+                    time < earliestTime
+                )
+                {
+                    earliestTime =
+                        time;
+
+
+                    earliestEscort =
+                        i;
+                }
+            }
+        }
+
+
+        /*
+           No Escort shell reaches
+           B before time limit.
+        */
+
+        if(earliestEscort == -1)
+        {
+            break;
+        }
+
+
+        applyEscortDamage(
+            B,
+
+            &E[earliestEscort],
+
+            cumulativeMode,
+
+            output,
+
+            earliestTime
+        );
+    }
+}
+
+
+/* =====================================
+        ONE BATTLE ITERATION
+   ===================================== */
+
+void runBattleAtCurrentPosition(
+    Battleship *B,
+
+    EscortShip E[],
+
+    int N,
+
+    double bMinAngle,
+    double bMaxAngle,
+
+    int cumulativeMode,
+
+    FILE *output,
+
+    int iteration
+)
+{
+    int attackOrder[MAX_SHIPS];
+
+    int attackCount;
+
+
+    fprintf(
+        output,
+
+        "\n================================\n"
+    );
+
+
+    fprintf(
+        output,
+
+        "ITERATION %d\n",
+
+        iteration
+    );
+
+
+    fprintf(
+        output,
+
+        "B position = "
+        "(%.2f, %.2f)\n",
+
+        B->x,
+
+        B->y
+    );
+
+
+    fprintf(
+        output,
+
+        "B firing interval "
+        "T_B = %.2f seconds\n",
+
+        B->firingInterval
+    );
+
+
+    fprintf(
+        output,
+
+        "B vertical angle range "
+        "= %.2f - %.2f\n",
+
+        bMinAngle,
+
+        bMaxAngle
+    );
+
+
+    /* =================================
+       CREATE ATTACK ORDER
+       ================================= */
+
+    attackCount =
+        buildAttackOrder(
+            *B,
+
+            E,
+
+            N,
+
+            bMinAngle,
+
+            bMaxAngle,
+
+            attackOrder
+        );
+
+
+    fprintf(
+        output,
+
+        "Attack order: "
+    );
+
+
+    if(attackCount == 0)
+    {
+        fprintf(
+            output,
+
+            "No reachable Escort ships\n"
+        );
+    }
+
+    else
+    {
+        for(int i = 0;
+            i < attackCount;
+            i++)
+        {
+            fprintf(
+                output,
+
+                "E%d",
+
+                E[attackOrder[i]].id
+            );
+
+
+            if(
+                i <
+                attackCount - 1
+            )
+            {
+                fprintf(
+                    output,
+
+                    " -> "
+                );
+            }
+        }
+
+
+        fprintf(
+            output,
+
+            "\n"
+        );
+    }
+
+
+    /* =================================
+       B ATTACKS USING T_B
+       ================================= */
+
+    for(int shot = 0;
+
+        shot < attackCount
+        &&
+        B->alive;
+
+        shot++)
+    {
+        int index;
+
+
+        double flightTime;
+
+        double angle;
+
+        double velocity;
+
+        double firingTime;
+
+        double impactTime;
+
+
+        index =
+            attackOrder[shot];
+
+
+        if(E[index].alive == 0)
+        {
+            continue;
+        }
+
+
+        if(
+            battleshipCanHit(
+                *B,
+
+                E[index],
+
+                bMinAngle,
+
+                bMaxAngle,
+
+                &flightTime,
+
+                &angle,
+
+                &velocity
+            )
+        )
+        {
+            /*
+               PART 2-A IMPORTANT:
+
+               Shot 1 -> 0 seconds
+
+               Shot 2 -> T_B
+
+               Shot 3 -> 2 * T_B
+
+               Shot 4 -> 3 * T_B
+            */
+
+            firingTime =
+                shot *
+                B->firingInterval;
+
+
+            /*
+               Total time until
+               shell hits target.
+            */
+
+            impactTime =
+                firingTime
+                +
+                flightTime;
+
+
+            /*
+               Before B shell reaches E,
+               check whether any Escort
+               shell reaches B.
+            */
+
+            resolveEscortAttacksUntil(
+                B,
+
+                E,
+
+                N,
+
+                impactTime,
+
+                cumulativeMode,
+
+                output
+            );
+
+
+            /*
+               B may have been destroyed
+               before its shell reached E.
+            */
+
+            if(B->alive == 0)
+            {
+                break;
+            }
+
+
+            /*
+               Successful B shell
+               destroys E.
+            */
+
+            E[index].alive =
+                0;
+
+
+            fprintf(
+                output,
+
+                "\nB attacked Escort E%d\n",
+
+                E[index].id
+            );
+
+
+            fprintf(
+                output,
+
+                "B firing time "
+                "= %.2f seconds\n",
+
+                firingTime
+            );
+
+
+            fprintf(
+                output,
+
+                "Shell flight time "
+                "= %.2f seconds\n",
+
+                flightTime
+            );
+
+
+            fprintf(
+                output,
+
+                "Impact time "
+                "= %.2f seconds\n",
+
+                impactTime
+            );
+
+
+            fprintf(
+                output,
+
+                "Firing angle "
+                "= %.2f degrees\n",
+
+                angle
+            );
+
+
+            fprintf(
+                output,
+
+                "Shell velocity "
+                "= %.2f\n",
+
+                velocity
+            );
+
+
+            fprintf(
+                output,
+
+                "Escort E%d destroyed\n",
+
+                E[index].id
+            );
+        }
+    }
+
+
+    /*
+       Remaining alive Escorts
+       can use their one attack.
+    */
+
+    if(B->alive)
+    {
+        resolveEscortAttacksUntil(
+            B,
+
+            E,
+
+            N,
+
+            INF_TIME,
+
+            cumulativeMode,
+
+            output
+        );
+    }
+
+
+    if(
+        cumulativeMode
+        &&
+        B->alive
+    )
+    {
+        fprintf(
+            output,
+
+            "\nB survived iteration.\n"
+        );
+
+
+        fprintf(
+            output,
+
+            "Cumulative impact "
+            "= %.2f\n",
+
+            B->cumulativeImpact
+        );
+    }
+}
+
+
+/* =====================================
+          SAVE BATTLEFIELD
+   ===================================== */
+
+void saveBattlefield(
+    const char *filename,
+
+    Battleship B,
+
+    EscortShip E[],
+
+    int N,
+
+    double D
 )
 {
     FILE *file;
 
-    int i;
 
-    file = fopen(
-        "2A_initial_conditions.txt",
-        "w"
-    );
+    file =
+        fopen(
+            filename,
+            "w"
+        );
 
-    if (file == NULL)
+
+    if(file == NULL)
     {
-        printf("Error opening file.\n");
+        printf(
+            "Could not open %s\n",
+
+            filename
+        );
+
         return;
     }
 
-    fprintf(
-        file,
-        "========== PART 2-A INITIAL CONDITIONS ==========\n\n"
-    );
 
     fprintf(
         file,
-        "Battleship: %s\n",
-        b->name
+
+        "Canvas = %.2f x %.2f\n",
+
+        D,
+
+        D
     );
+
 
     fprintf(
         file,
-        "Notation: %c\n",
-        b->notation
+
+        "B type = %c\n",
+
+        B.type
     );
+
 
     fprintf(
         file,
-        "Position: (%d, %d)\n",
-        b->x,
-        b->y
+
+        "B position = "
+        "(%.2f, %.2f)\n",
+
+        B.x,
+
+        B.y
     );
+
 
     fprintf(
         file,
-        "B Firing Time (T_B): %.2f seconds\n\n",
-        b->reload_time
+
+        "B max velocity = %.2f\n",
+
+        B.maxVelocity
     );
+
 
     fprintf(
         file,
-        "ID\tType\tX\tY\tDistance\tImpact Power\n"
+
+        "B firing interval T_B "
+        "= %.2f\n",
+
+        B.firingInterval
     );
 
-    for (i = 0; i < setup_escort_count; i++)
+
+    fprintf(
+        file,
+
+        "B cumulative impact "
+        "= %.2f\n",
+
+        B.cumulativeImpact
+    );
+
+
+    fprintf(
+        file,
+
+        "B alive = %d\n\n",
+
+        B.alive
+    );
+
+
+    for(int i = 0;
+        i < N;
+        i++)
     {
         fprintf(
             file,
-            "%d\t%c\t%d\t%d\t%.2f\t%.2f\n",
-            enemies[i].id,
-            enemies[i].notation,
-            enemies[i].x,
-            enemies[i].y,
-            enemies[i].distance,
-            enemies[i].impact_power
+
+            "Escort E%d\n",
+
+            E[i].id
+        );
+
+
+        fprintf(
+            file,
+
+            "Type = E%c\n",
+
+            E[i].type
+        );
+
+
+        fprintf(
+            file,
+
+            "Position = "
+            "(%.2f, %.2f)\n",
+
+            E[i].x,
+
+            E[i].y
+        );
+
+
+        fprintf(
+            file,
+
+            "Velocity = "
+            "%.2f - %.2f\n",
+
+            E[i].minVelocity,
+
+            E[i].maxVelocity
+        );
+
+
+        fprintf(
+            file,
+
+            "Angles = "
+            "%.2f - %.2f\n",
+
+            E[i].minAngle,
+
+            E[i].maxAngle
+        );
+
+
+        fprintf(
+            file,
+
+            "Impact power = %.2f\n",
+
+            E[i].impactPower
+        );
+
+
+        fprintf(
+            file,
+
+            "Alive = %d\n",
+
+            E[i].alive
+        );
+
+
+        fprintf(
+            file,
+
+            "Has fired = %d\n\n",
+
+            E[i].hasFired
         );
     }
+
 
     fclose(file);
 }
 
 
-/* ---------------------------------------------------------
-   Run Part 2-A Simulation
-   --------------------------------------------------------- */
+/* =====================================
+       STATIONARY SIMULATION
+   ===================================== */
 
-void runSimulation(int simulationType)
+void runStationarySimulation(
+    const char *resultFilename,
+
+    const char *finalFilename,
+
+    Battleship initialB,
+
+    EscortShip initialE[],
+
+    int N,
+
+    double D,
+
+    int cumulativeMode
+)
 {
-    struct Battleship b;
-
-    struct EscortShip enemies[MAX_SHIPS];
-
-    int attackOrder[MAX_SHIPS];
-
-    int aliveEnemies;
-
-    int iteration;
-
-    int orderCount;
-
-    float totalTime = 0.0;
-
-    float cumulativeImpact = 0.0;
-
-    int killerID = -1;
-
-    FILE *logFile;
-
-    int i;
+    Battleship B;
 
 
-    printf("\n============================================\n");
-
-    if (simulationType == 1)
-        printf("       PART 2-A - SIMULATION 1\n");
-
-    else if (simulationType == 2)
-        printf("       PART 2-A - SIMULATION 2\n");
-
-    else
-        printf("       PART 2-A - SIMULATION 3\n");
-
-    printf("============================================\n");
+    EscortShip E[MAX_SHIPS];
 
 
-    initializeBattlefield(
-        &b,
-        enemies
+    FILE *output;
+
+
+    B =
+        initialB;
+
+
+    copyEscorts(
+        E,
+
+        initialE,
+
+        N
     );
 
 
-    saveInitialConditions(
-        &b,
-        enemies
-    );
+    output =
+        fopen(
+            resultFilename,
+
+            "w"
+        );
 
 
-    if (simulationType == 1)
+    if(output == NULL)
     {
-        logFile =
-            fopen(
-                "2A_part1A_results.txt",
-                "w"
-            );
-    }
-    else if (simulationType == 2)
-    {
-        logFile =
-            fopen(
-                "2A_part1B_results.txt",
-                "w"
-            );
-    }
-    else
-    {
-        logFile =
-            fopen(
-                "2A_part1C_results.txt",
-                "w"
-            );
-    }
+        printf(
+            "Error opening result file.\n"
+        );
 
-
-    if (logFile == NULL)
-    {
-        printf("Unable to create result file.\n");
         return;
-    }
-
-
-    fprintf(
-        logFile,
-        "========== PART 2-A SIMULATION ==========\n\n"
-    );
-
-    fprintf(
-        logFile,
-        "Battleship: %s\n",
-        b.name
-    );
-
-    fprintf(
-        logFile,
-        "B Firing Time T_B: %.2f seconds\n\n",
-        b.reload_time
-    );
-
-
-    aliveEnemies =
-        setup_escort_count;
-
-
-    iteration = 1;
-
-
-    while (
-        aliveEnemies > 0 &&
-        b.health > 0 &&
-        iteration <= setup_k_points
-    )
-    {
-
-        /*
-           Part 1-B uses movement through
-           generated points.
-
-           Part 1-A keeps the same position.
-        */
-
-        if (simulationType == 2)
-        {
-            b.x =
-                rand() %
-                (setup_canvas_size + 1);
-
-            b.y =
-                rand() %
-                (setup_canvas_size + 1);
-
-            updateDistances(
-                &b,
-                enemies
-            );
-        }
-
-
-        printf(
-            "\n--- Iteration %d ---\n",
-            iteration
-        );
-
-        printf(
-            "B Position: (%d, %d)\n",
-            b.x,
-            b.y
-        );
-
-
-        fprintf(
-            logFile,
-            "\n--- Iteration %d ---\n",
-            iteration
-        );
-
-        fprintf(
-            logFile,
-            "B Position: (%d, %d)\n",
-            b.x,
-            b.y
-        );
-
-
-        /*
-           Time between B gun firings.
-        */
-
-        totalTime += b.reload_time;
-
-
-        int jammed = 0;
-
-
-        if (
-            simulationType == 2 &&
-            iteration >= setup_jam_iteration
-        )
-        {
-            jammed = 1;
-
-            printf(
-                "B gun JAMMED. Minimum angle = %.2f\n",
-                setup_theta_min
-            );
-
-            fprintf(
-                logFile,
-                "B gun JAMMED. Minimum angle = %.2f\n",
-                setup_theta_min
-            );
-        }
-
-
-        /*
-           Find E ships inside B's
-           attack range.
-        */
-
-        orderCount = 0;
-
-
-        for (i = 0; i < setup_escort_count; i++)
-        {
-            if (enemies[i].health > 0)
-            {
-                if (
-                    canBattleshipHit(
-                        &b,
-                        &enemies[i],
-                        jammed
-                    )
-                )
-                {
-                    attackOrder[orderCount] = i;
-
-                    orderCount++;
-                }
-            }
-        }
-
-
-        /*
-           Apply custom strategy.
-        */
-
-        if (orderCount > 0)
-        {
-            sortAttackOrder(
-                &b,
-                enemies,
-                attackOrder,
-                orderCount
-            );
-        }
-
-
-        /*
-           Save attack order.
-        */
-
-        fprintf(
-            logFile,
-            "B Attack Order: "
-        );
-
-        for (i = 0; i < orderCount; i++)
-        {
-            int index =
-                attackOrder[i];
-
-            fprintf(
-                logFile,
-                "E%d",
-                enemies[index].id
-            );
-
-            if (i < orderCount - 1)
-                fprintf(
-                    logFile,
-                    " -> "
-                );
-        }
-
-        fprintf(
-            logFile,
-            "\n"
-        );
-
-
-        printf(
-            "B Attack Order: "
-        );
-
-
-        for (i = 0; i < orderCount; i++)
-        {
-            int index =
-                attackOrder[i];
-
-            printf(
-                "E%d",
-                enemies[index].id
-            );
-
-            if (i < orderCount - 1)
-                printf(
-                    " -> "
-                );
-        }
-
-        printf("\n");
-
-
-        /*
-           B fires one shell.
-
-           In Part 1-A/B/C,
-           B can destroy an E with
-           one attack.
-        */
-
-        if (orderCount > 0)
-        {
-            int target =
-                attackOrder[0];
-
-            b.shots_fired++;
-
-            enemies[target].health = 0;
-
-            aliveEnemies--;
-
-
-            printf(
-                "B fired at E%d.\n",
-                enemies[target].id
-            );
-
-            printf(
-                "E%d destroyed.\n",
-                enemies[target].id
-            );
-
-
-            fprintf(
-                logFile,
-                "B fired at E%d.\n",
-                enemies[target].id
-            );
-
-            fprintf(
-                logFile,
-                "E%d destroyed.\n",
-                enemies[target].id
-            );
-        }
-
-
-        /*
-           Escort ships attack.
-
-           Part 1-A/B:
-           One successful E attack destroys B.
-
-           Part 1-C:
-           Each E damages B according to
-           its impact power and each E
-           can attack only once.
-        */
-
-        for (i = 0; i < setup_escort_count; i++)
-        {
-            if (
-                enemies[i].health > 0 &&
-                enemies[i].has_attacked == 0
-            )
-            {
-                /*
-                   For this simulation we assume
-                   an E can attack when its
-                   projectile is physically possible.
-                */
-
-                float sineValue =
-                    (enemies[i].distance * G) /
-                    (300.0 * 300.0);
-
-                if (sineValue <= 1.0)
-                {
-                    /*
-                       Part 1-C:
-                       percentage damage.
-                    */
-
-                    if (simulationType == 3)
-                    {
-                        float damage =
-                            enemies[i].impact_power *
-                            100.0;
-
-                        b.health -= damage;
-
-                        cumulativeImpact += damage;
-
-                        enemies[i].has_attacked = 1;
-
-
-                        printf(
-                            "E%d attacked B: %.2f%% damage\n",
-                            enemies[i].id,
-                            damage
-                        );
-
-                        fprintf(
-                            logFile,
-                            "E%d attacked B: %.2f%% damage\n",
-                            enemies[i].id,
-                            damage
-                        );
-                    }
-
-                    /*
-                       Part 1-A/B:
-                       One E attack destroys B.
-                    */
-
-                    else
-                    {
-                        b.health = 0;
-
-                        killerID =
-                            enemies[i].id;
-
-                        enemies[i].has_attacked = 1;
-
-
-                        printf(
-                            "E%d destroyed B!\n",
-                            enemies[i].id
-                        );
-
-                        fprintf(
-                            logFile,
-                            "E%d destroyed B!\n",
-                            enemies[i].id
-                        );
-
-                        break;
-                    }
-                }
-            }
-        }
-
-
-        if (b.health < 0)
-            b.health = 0;
-
-
-        printf(
-            "B Health: %.2f%%\n",
-            b.health
-        );
-
-        printf(
-            "Elapsed Time: %.2f seconds\n",
-            totalTime
-        );
-
-
-        fprintf(
-            logFile,
-            "B Health: %.2f%%\n",
-            b.health
-        );
-
-        fprintf(
-            logFile,
-            "Elapsed Time: %.2f seconds\n",
-            totalTime
-        );
-
-
-        iteration++;
     }
 
 
     /*
-       Final results
+       One stationary battle
     */
 
-    fprintf(
-        logFile,
-        "\n========== FINAL RESULTS ==========\n"
-    );
+    runBattleAtCurrentPosition(
+        &B,
 
-    fprintf(
-        logFile,
-        "Battle Duration: %.2f seconds\n",
-        totalTime
-    );
+        E,
 
-    fprintf(
-        logFile,
-        "B Health: %.2f%%\n",
-        b.health
-    );
+        N,
 
-    fprintf(
-        logFile,
-        "B Shots Fired: %d\n",
-        b.shots_fired
+        0.1,
+
+        89.9,
+
+        cumulativeMode,
+
+        output,
+
+        1
     );
 
 
-    if (b.health <= 0)
+    fprintf(
+        output,
+
+        "\nFinal B status = %s\n",
+
+        B.alive
+        ?
+        "ALIVE"
+        :
+        "DESTROYED"
+    );
+
+
+    if(cumulativeMode)
     {
-        printf(
-            "\nBATTLESHIP DESTROYED!\n"
-        );
-
-        printf(
-            "E%d sank the Battleship.\n",
-            killerID
-        );
-
         fprintf(
-            logFile,
-            "Battleship destroyed by E%d.\n",
-            killerID
-        );
-    }
-    else
-    {
-        printf(
-            "\nBattleship survived.\n"
-        );
+            output,
 
-        printf(
-            "Cumulative impact on B: %.2f%%\n",
-            cumulativeImpact
-        );
+            "Final cumulative impact "
+            "= %.2f\n",
 
-        fprintf(
-            logFile,
-            "Cumulative Impact on B: %.2f%%\n",
-            cumulativeImpact
+            B.cumulativeImpact
         );
     }
 
 
-    fprintf(
-        logFile,
-        "\nFinal Escort Ship Status:\n"
-    );
+    fclose(output);
 
 
-    for (i = 0; i < setup_escort_count; i++)
-    {
-        fprintf(
-            logFile,
-            "E%d | Type %c | Health %.2f%% | "
-            "Position (%d,%d)\n",
-            enemies[i].id,
-            enemies[i].notation,
-            enemies[i].health,
-            enemies[i].x,
-            enemies[i].y
-        );
-    }
+    saveBattlefield(
+        finalFilename,
 
+        B,
 
-    fclose(logFile);
+        E,
 
+        N,
 
-    printf(
-        "\nSimulation completed.\n"
-    );
-
-    printf(
-        "Results saved to text file.\n"
+        D
     );
 }
 
 
-/* ---------------------------------------------------------
-   Part 2-A menu
-   --------------------------------------------------------- */
+/* =====================================
+          PATH SIMULATION
+   ===================================== */
 
-void simulationMenu()
+void runPathSimulation(
+    const char *resultFilename,
+
+    const char *finalFilename,
+
+    Battleship initialB,
+
+    EscortShip initialE[],
+
+    int N,
+
+    double pathX[],
+
+    double pathY[],
+
+    int k,
+
+    int jamMode,
+
+    int t,
+
+    double thetaMin,
+
+    double D,
+
+    int cumulativeMode
+)
 {
-    int choice;
+    Battleship B;
 
-    do
+
+    EscortShip E[MAX_SHIPS];
+
+
+    FILE *output;
+
+
+    B =
+        initialB;
+
+
+    copyEscorts(
+        E,
+
+        initialE,
+
+        N
+    );
+
+
+    output =
+        fopen(
+            resultFilename,
+
+            "w"
+        );
+
+
+    if(output == NULL)
     {
-        printf("\n============================================\n");
-        printf("             PART 2-A MENU\n");
-        printf("============================================\n");
+        printf(
+            "Error opening result file.\n"
+        );
 
-        printf("1. Simulate Part 1-A\n");
-        printf("2. Simulate Part 1-B\n");
-        printf("3. Simulate Part 1-C\n");
-        printf("4. Return\n");
-
-        printf("Enter choice: ");
-        scanf("%d", &choice);
+        return;
+    }
 
 
-        switch (choice)
+    /*
+       Repeat for k path points
+       or until B is destroyed.
+    */
+
+    for(int step = 0;
+
+        step < k
+        &&
+        B.alive;
+
+        step++)
+    {
+        double bMinAngle;
+
+
+        B.x =
+            pathX[step];
+
+
+        B.y =
+            pathY[step];
+
+
+        /*
+           Normal B angle
+        */
+
+        bMinAngle =
+            0.1;
+
+
+        /*
+           Part 1-B Simulation 2:
+
+           After t iterations,
+           B gun is jammed.
+        */
+
+        if(
+            jamMode
+            &&
+            (step + 1) > t
+        )
         {
-            case 1:
-                runSimulation(1);
-                break;
-
-            case 2:
-                runSimulation(2);
-                break;
-
-            case 3:
-                runSimulation(3);
-                break;
-
-            case 4:
-                break;
-
-            default:
-                printf("Invalid choice.\n");
+            bMinAngle =
+                thetaMin;
         }
 
-    } while (choice != 4);
+
+        runBattleAtCurrentPosition(
+            &B,
+
+            E,
+
+            N,
+
+            bMinAngle,
+
+            89.9,
+
+            cumulativeMode,
+
+            output,
+
+            step + 1
+        );
+    }
+
+
+    fprintf(
+        output,
+
+        "\nFinal B status = %s\n",
+
+        B.alive
+        ?
+        "ALIVE"
+        :
+        "DESTROYED"
+    );
+
+
+    if(cumulativeMode)
+    {
+        fprintf(
+            output,
+
+            "Final cumulative impact "
+            "= %.2f\n",
+
+            B.cumulativeImpact
+        );
+    }
+
+
+    fclose(output);
+
+
+    saveBattlefield(
+        finalFilename,
+
+        B,
+
+        E,
+
+        N,
+
+        D
+    );
 }
 
 
-/* ---------------------------------------------------------
-   Instructions
-   --------------------------------------------------------- */
-
-void displayInstructions()
-{
-    printf("\n============================================\n");
-    printf("              PART 2-A INSTRUCTIONS\n");
-    printf("============================================\n");
-
-    printf("\n1. Battleship has one gun.\n");
-
-    printf(
-        "2. T_B represents the time between "
-        "two consecutive B gun firings.\n"
-    );
-
-    printf(
-        "3. T_B is entered by the user.\n"
-    );
-
-    printf(
-        "4. B uses a custom attack strategy.\n"
-    );
-
-    printf(
-        "5. Highest Impact Power E ships are "
-        "selected first.\n"
-    );
-
-    printf(
-        "6. If Impact Power is equal, "
-        "the nearest E is selected first.\n"
-    );
-
-    printf(
-        "7. Part 1-A, 1-B and 1-C simulations "
-        "are supported.\n"
-    );
-
-    printf(
-        "8. Attack order is saved in the "
-        "simulation result files.\n"
-    );
-
-    printf(
-        "9. Part 1-C uses percentage damage "
-        "from E ships.\n"
-    );
-
-    printf(
-        "10. Each E ship can attack only once "
-        "in Part 1-C.\n"
-    );
-}
-
-
-/* ---------------------------------------------------------
-   Statistics
-   --------------------------------------------------------- */
-
-void displayStatistics()
-{
-    FILE *file;
-
-    char filename[100];
-
-    int choice;
-
-    printf("\n--- Simulation Statistics ---\n");
-
-    printf("1. Part 1-A results\n");
-    printf("2. Part 1-B results\n");
-    printf("3. Part 1-C results\n");
-
-    printf("Enter choice: ");
-    scanf("%d", &choice);
-
-
-    if (choice == 1)
-    {
-        sprintf(
-            filename,
-            "2A_part1A_results.txt"
-        );
-    }
-    else if (choice == 2)
-    {
-        sprintf(
-            filename,
-            "2A_part1B_results.txt"
-        );
-    }
-    else if (choice == 3)
-    {
-        sprintf(
-            filename,
-            "2A_part1C_results.txt"
-        );
-    }
-    else
-    {
-        printf("Invalid choice.\n");
-        return;
-    }
-
-
-    file = fopen(filename, "r");
-
-
-    if (file == NULL)
-    {
-        printf(
-            "No simulation result found.\n"
-        );
-
-        return;
-    }
-
-
-    char ch;
-
-    while ((ch = fgetc(file)) != EOF)
-    {
-        putchar(ch);
-    }
-
-
-    fclose(file);
-}
-
-
-/* ---------------------------------------------------------
-   Main
-   --------------------------------------------------------- */
+/* =========================================
+                  MAIN
+   ========================================= */
 
 int main()
 {
-    int choice;
+    Battleship initialB;
 
-    /*
-       Default random seed
-    */
 
-    srand((unsigned int)time(NULL));
+    EscortShip initialE[MAX_SHIPS];
+
+
+    double pathX[MAX_POINTS];
+
+    double pathY[MAX_POINTS];
+
+
+    int N;
+
+    int k;
+
+    int t;
+
+
+    double D;
+
+    double thetaMin;
+
+
+    unsigned int seed;
+
+
+    printf(
+        "========== PART 2-A ==========\n"
+    );
+
+
+    /* =================================
+       Canvas size
+       ================================= */
+
+    do
+    {
+        printf(
+            "Enter battlefield size D: "
+        );
+
+
+        scanf(
+            "%lf",
+
+            &D
+        );
+
+    }
+    while(D <= 0.0);
+
+
+    /* =================================
+       Number of Escorts
+       ================================= */
+
+    do
+    {
+        printf(
+            "Enter number of "
+            "Escort ships: "
+        );
+
+
+        scanf(
+            "%d",
+
+            &N
+        );
+
+    }
+    while(
+        N < 1
+        ||
+        N > MAX_SHIPS
+    );
+
+
+    /* =================================
+       Number of path points
+       ================================= */
+
+    do
+    {
+        printf(
+            "Enter number of "
+            "path points k: "
+        );
+
+
+        scanf(
+            "%d",
+
+            &k
+        );
+
+    }
+    while(
+        k < 2
+        ||
+        k > MAX_POINTS
+    );
+
+
+    /* =================================
+       Battleship type
+       ================================= */
+
+    do
+    {
+        printf(
+            "Enter Battleship type "
+            "(U/M/R/S): "
+        );
+
+
+        scanf(
+            " %c",
+
+            &initialB.type
+        );
+
+    }
+    while(
+        initialB.type != 'U'
+        &&
+        initialB.type != 'M'
+        &&
+        initialB.type != 'R'
+        &&
+        initialB.type != 'S'
+    );
+
+
+    /* =================================
+       Battleship max velocity
+       ================================= */
+
+    do
+    {
+        printf(
+            "Enter Battleship maximum "
+            "shell velocity: "
+        );
+
+
+        scanf(
+            "%lf",
+
+            &initialB.maxVelocity
+        );
+
+    }
+    while(
+        initialB.maxVelocity <= 0.0
+    );
+
+
+    /* =================================
+       PART 2-A IMPORTANT
+
+       T_B = time between
+       consecutive B firings
+       ================================= */
+
+    do
+    {
+        printf(
+            "Enter Battleship firing "
+            "interval T_B in seconds: "
+        );
+
+
+        scanf(
+            "%lf",
+
+            &initialB.firingInterval
+        );
+
+    }
+    while(
+        initialB.firingInterval
+        <= 0.0
+    );
+
+
+    /* =================================
+       Initial B X position
+       ================================= */
+
+    do
+    {
+        printf(
+            "Enter initial Battleship "
+            "X position: "
+        );
+
+
+        scanf(
+            "%lf",
+
+            &initialB.x
+        );
+
+    }
+    while(
+        initialB.x < 0.0
+        ||
+        initialB.x > D
+    );
+
+
+    /* =================================
+       Initial B Y position
+       ================================= */
+
+    do
+    {
+        printf(
+            "Enter initial Battleship "
+            "Y position: "
+        );
+
+
+        scanf(
+            "%lf",
+
+            &initialB.y
+        );
+
+    }
+    while(
+        initialB.y < 0.0
+        ||
+        initialB.y > D
+    );
+
+
+    initialB.alive =
+        1;
+
+
+    initialB.cumulativeImpact =
+        0.0;
+
+
+    /* =================================
+       Random seed
+       ================================= */
+
+    printf(
+        "Enter random seed: "
+    );
+
+
+    scanf(
+        "%u",
+
+        &seed
+    );
+
+
+    srand(seed);
+
+
+    /* =================================
+       Generate Escort ships
+       ================================= */
+
+    for(int i = 0;
+        i < N;
+        i++)
+    {
+        char type;
+
+
+        initialE[i].id =
+            i + 1;
+
+
+        initialE[i].x =
+            randomDouble(
+                0.0,
+
+                D
+            );
+
+
+        initialE[i].y =
+            randomDouble(
+                0.0,
+
+                D
+            );
+
+
+        /*
+           Random E type A-E
+        */
+
+        type =
+            'A'
+            +
+            rand() % 5;
+
+
+        setEscortProperties(
+            &initialE[i],
+
+            type,
+
+            initialB.maxVelocity
+        );
+    }
+
+
+    /* =================================
+       Generate path
+       ================================= */
+
+    pathX[0] =
+        initialB.x;
+
+
+    pathY[0] =
+        initialB.y;
+
+
+    for(int i = 1;
+        i < k;
+        i++)
+    {
+        pathX[i] =
+            randomDouble(
+                0.0,
+
+                D
+            );
+
+
+        pathY[i] =
+            randomDouble(
+                0.0,
+
+                D
+            );
+    }
+
+
+    /* =================================
+       Jam settings for 1-B Sim 2
+       ================================= */
+
+    do
+    {
+        printf(
+            "Enter t for gun jam "
+            "(0 < t < k): "
+        );
+
+
+        scanf(
+            "%d",
+
+            &t
+        );
+
+    }
+    while(
+        t <= 0
+        ||
+        t >= k
+    );
 
 
     do
     {
-        printf("\n");
-        printf("============================================\n");
-        printf("        NAVAL BATTLE SIMULATOR\n");
-        printf("                 PART 2-A\n");
-        printf("============================================\n");
-
-        printf("1. Setup\n");
-        printf("2. Start Simulation\n");
-        printf("3. View Instructions\n");
-        printf("4. Simulation Statistics\n");
-        printf("5. Exit\n");
-
-        printf("Enter choice: ");
-        scanf("%d", &choice);
+        printf(
+            "Enter theta_min "
+            "(0 < theta_min < 30): "
+        );
 
 
-        switch (choice)
-        {
-            case 1:
-                setupMenu();
-                break;
+        scanf(
+            "%lf",
 
-            case 2:
-                simulationMenu();
-                break;
+            &thetaMin
+        );
 
-            case 3:
-                displayInstructions();
-                break;
+    }
+    while(
+        thetaMin <= 0.0
+        ||
+        thetaMin >= 30.0
+    );
 
-            case 4:
-                displayStatistics();
-                break;
 
-            case 5:
-                printf(
-                    "\nExiting simulator...\n"
-                );
-                break;
+    /* =================================
+       Save initial conditions
+       ================================= */
 
-            default:
-                printf(
-                    "Invalid choice.\n"
-                );
-        }
+    saveBattlefield(
+        "part2A_initial.txt",
 
-    } while (choice != 5);
+        initialB,
+
+        initialE,
+
+        N,
+
+        D
+    );
+
+
+    /* =================================
+       REDO PART 1-A
+       ================================= */
+
+    printf(
+        "\n--- 2-A: Redo Part 1-A ---\n"
+    );
+
+
+    runStationarySimulation(
+        "part2A_part1A_results.txt",
+
+        "part2A_part1A_final.txt",
+
+        initialB,
+
+        initialE,
+
+        N,
+
+        D,
+
+        0
+    );
+
+
+    /* =================================
+       REDO PART 1-B
+       SIMULATION 1
+       ================================= */
+
+    printf(
+        "--- 2-A: Redo Part 1-B "
+        "Simulation 1 ---\n"
+    );
+
+
+    runPathSimulation(
+        "part2A_part1B_sim1_results.txt",
+
+        "part2A_part1B_sim1_final.txt",
+
+        initialB,
+
+        initialE,
+
+        N,
+
+        pathX,
+
+        pathY,
+
+        k,
+
+        0,
+
+        t,
+
+        thetaMin,
+
+        D,
+
+        0
+    );
+
+
+    /* =================================
+       REDO PART 1-B
+       SIMULATION 2
+       ================================= */
+
+    printf(
+        "--- 2-A: Redo Part 1-B "
+        "Simulation 2 ---\n"
+    );
+
+
+    runPathSimulation(
+        "part2A_part1B_sim2_results.txt",
+
+        "part2A_part1B_sim2_final.txt",
+
+        initialB,
+
+        initialE,
+
+        N,
+
+        pathX,
+
+        pathY,
+
+        k,
+
+        1,
+
+        t,
+
+        thetaMin,
+
+        D,
+
+        0
+    );
+
+
+    /* =================================
+       REDO PART 1-C
+       STATIONARY VERSION
+       ================================= */
+
+    printf(
+        "--- 2-A: Redo Part 1-C / "
+        "1-A ---\n"
+    );
+
+
+    runStationarySimulation(
+        "part2A_part1C_A_results.txt",
+
+        "part2A_part1C_A_final.txt",
+
+        initialB,
+
+        initialE,
+
+        N,
+
+        D,
+
+        1
+    );
+
+
+    /* =================================
+       REDO PART 1-C
+       PART 1-B SIMULATION 1
+       ================================= */
+
+    printf(
+        "--- 2-A: Redo Part 1-C / "
+        "1-B Simulation 1 ---\n"
+    );
+
+
+    runPathSimulation(
+        "part2A_part1C_B1_results.txt",
+
+        "part2A_part1C_B1_final.txt",
+
+        initialB,
+
+        initialE,
+
+        N,
+
+        pathX,
+
+        pathY,
+
+        k,
+
+        0,
+
+        t,
+
+        thetaMin,
+
+        D,
+
+        1
+    );
+
+
+    /* =================================
+       REDO PART 1-C
+       PART 1-B SIMULATION 2
+       ================================= */
+
+    printf(
+        "--- 2-A: Redo Part 1-C / "
+        "1-B Simulation 2 ---\n"
+    );
+
+
+    runPathSimulation(
+        "part2A_part1C_B2_results.txt",
+
+        "part2A_part1C_B2_final.txt",
+
+        initialB,
+
+        initialE,
+
+        N,
+
+        pathX,
+
+        pathY,
+
+        k,
+
+        1,
+
+        t,
+
+        thetaMin,
+
+        D,
+
+        1
+    );
+
+
+    printf(
+        "\nPart 2-A completed.\n"
+    );
 
 
     return 0;
